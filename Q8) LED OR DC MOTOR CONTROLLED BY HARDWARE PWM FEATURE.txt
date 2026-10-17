@@ -1,0 +1,159 @@
+Q8)
+
+config.h
+
+#ifndef CONFIG_H_
+#define CONFIG_H_
+
+// Define CPU frequency as 16MHz for delay and timing functions
+#define F_CPU 16000000UL
+
+
+
+
+
+#endif /* CONFIG_H_ */
+
+
+BUTTON.C
+
+#include "config.h"
+#include "button.h"
+#define F_CPU 16000000UL
+#include <util/delay.h>
+
+/**
+ * Initialize the button pin as input with internal pull-up enabled
+ */
+void button_init(void) {
+    BUTTON_DDR &= ~(1 << BUTTON_PIN_NUM);  // Set as input
+    BUTTON_PORT |= (1 << BUTTON_PIN_NUM);  // Enable internal pull-up resistor
+}
+
+ 
+BUTTON.H
+
+#ifndef BUTTON_H_
+#define BUTTON_H_
+
+#include <avr/io.h>
+#include <stdbool.h>
+
+// Hardware mapping for the button
+#define BUTTON_DDR       DDRD
+#define BUTTON_PORT      PORTD
+#define BUTTON_PIN       PIND
+#define BUTTON_PIN_NUM   PIND2
+
+// Function Prototypes
+void button_init(void);
+bool button_is_pressed(void);
+
+
+
+
+
+#endif /* BUTTON_H_ */
+
+
+PWM.C
+
+#include "config.h"
+#include "pwm.h"
+
+/**
+ * Initialize Timer0 in Fast PWM mode on OC0A pin
+ */
+void pwm_init(void) {
+    // Set PWM pin as output
+    PWM_DDR |= (1 << PWM_PIN_NUM);
+
+    // Fast PWM mode, Clear OC0A on Compare Match (Non-inverting mode)
+    TCCR0A = (1 << COM0A1) | (1 << WGM01) | (1 << WGM00);
+
+    // Set Prescaler to 64 and start Timer0
+    TCCR0B = (1 << CS01) | (1 << CS00);
+}
+
+/**
+ * Set the duty cycle based on the pre-defined enum levels
+ */
+void pwm_set_level(pwm_level_t level) {
+    switch (level) {
+        case PWM_LEVEL_25:
+            OCR0A = 64;  // ~25% Duty Cycle
+            break;
+        case PWM_LEVEL_50:
+            OCR0A = 128; // ~50% Duty Cycle
+            break;
+        case PWM_LEVEL_75:
+            OCR0A = 191; // ~75% Duty Cycle
+            break;
+        case PWM_LEVEL_OFF:
+            OCR0A = 0;   // 0% Duty Cycle (Fully OFF)
+            break;
+        default:
+            OCR0A = 64;  // Fallback safe state
+            break;
+    }
+}
+
+
+
+PWM.H
+
+#ifndef PWM_H_
+#define PWM_H_
+
+#include <avr/io.h>
+
+// Hardware mapping for the PWM output
+#define PWM_DDR          DDRD
+#define PWM_PIN_NUM      DDD6
+
+// Available PWM speed/brightness steps
+typedef enum {
+	PWM_LEVEL_25 = 0,
+	PWM_LEVEL_50,
+	PWM_LEVEL_75,
+	PWM_LEVEL_OFF,
+	PWM_LEVEL_MAX_STATES // Total number of states (4)
+} pwm_level_t;
+
+// Function Prototypes
+void pwm_init(void);
+void pwm_set_level(pwm_level_t level);
+
+
+
+
+#endif /* PWM_H_ */
+
+
+MAIN.C
+
+#include "config.h"
+#include "button.h"
+#include "pwm.h"
+
+int main(void) {
+	// Hardware modules initialization
+	button_init();
+	pwm_init();
+
+	// Start application with the first level (25%)
+	pwm_level_t current_level = PWM_LEVEL_25;
+	pwm_set_level(current_level);
+
+	// Main Application Loop
+	while (1) {
+		// Check if a valid button press happened
+		if (button_is_pressed()) {
+			// Cycle through the levels safely using the Enum count
+			current_level = (current_level + 1) % PWM_LEVEL_MAX_STATES;
+			
+			// Apply the new PWM level
+			pwm_set_level(current_level);
+		}
+	}
+}

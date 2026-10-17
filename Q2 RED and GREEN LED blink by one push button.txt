@@ -1,0 +1,58 @@
+Q2
+
+#ifndef F_CPU
+#define F_CPU 16000000UL   // Define CPU Clock Frequency as 16 MHz
+#endif
+
+#include <avr/io.h>        // Include AVR Input/Output register definitions
+#include <util/delay.h>    // Include delay library for debouncing
+
+// Pin Definitions for better readability and maintainability
+#define RED_LED    PD2
+#define GREEN_LED  PD3
+#define BUTTON     PD4
+
+int main(void) {
+	// 1. Configure LED pins as OUTPUT
+	DDRD |= (1 << RED_LED) | (1 << GREEN_LED);
+	
+	// 2. Configure BUTTON pin as INPUT
+	DDRD &= ~(1 << BUTTON);
+	
+	// 3. Enable Internal Pull-up resistor for the BUTTON
+	PORTD |= (1 << BUTTON);
+	
+	// 4. Set Initial State: Red LED ON, Green LED OFF
+	PORTD |= (1 << RED_LED);
+	PORTD &= ~(1 << GREEN_LED);
+	
+	// Variable to track the previous state of the button (State Change Detection)
+	uint8_t button_was_pressed = 0;
+	
+	while (1) {
+		// Check if the button is pressed (Active LOW due to pull-up)
+		if (!(PIND & (1 << BUTTON))) {
+			
+			// Software Debouncing: Wait for 20ms to filter out mechanical noise
+			_delay_ms(20);
+			
+			// Re-verify if the button is still pressed and wasn't handled yet
+			if (!(PIND & (1 << BUTTON)) && !button_was_pressed) {
+				
+				// Toggle the states of both LEDs simultaneously using XOR (^)
+				PORTD ^= (1 << RED_LED);
+				PORTD ^= (1 << GREEN_LED);
+				
+				// Set the flag to true so it triggers only ONCE per press
+				button_was_pressed = 1;
+			}
+		}
+		else {
+			// Button is released, reset the tracking flag
+			button_was_pressed = 0;
+		}
+	}
+
+	return 0;
+}
+

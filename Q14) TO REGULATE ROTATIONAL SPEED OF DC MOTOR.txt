@@ -1,0 +1,154 @@
+Q14
+
+ADC.C
+
+#include <avr/io.h>
+#include "adc.h"
+
+void adc_init(void) {
+	/* Reference voltage selection: AVCC with external capacitor at AREF */
+	ADMUX = (1 << REFS0);
+	
+	/* Enable ADC and set Clock division factor to 128 (16MHz/128 = 125kHz ADC Clock) */
+	ADCSRA = (1 << ADEN) | (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0);
+}
+
+uint8_t adc_read_scaled(uint8_t channel) {
+	/* Ensure the channel requested falls within valid AVR ADC boundaries (0-7) */
+	channel &= 0x07;
+	
+	/* Clear existing input selection and set target ADC channel */
+	ADMUX = (ADMUX & ~ADC_CHANNEL_MASK) | channel;
+	
+	/* Start Analog to Digital conversion */
+	ADCSRA |= (1 << ADSC);
+	
+	/* Wait for conversion to finish (Hardware clears ADSC bit when complete) */
+	while (ADCSRA & (1 << ADSC));
+	
+	/* Read 10-bit ADC result and shift right by 2 bits to scale it to 8-bit (0-255) */
+	return (uint8_t)(ADC >> 2);
+}
+
+
+
+ADC.H
+
+#ifndef ADC_H_
+#define ADC_H_
+
+#include <stdint.h>
+
+/* ADC Channel Configuration */
+#define POT_ADC_CHANNEL   0           /**< Potentiometer connected to ADC0 */
+#define ADC_CHANNEL_MASK  0x0F        /**< Mask to clear MUX bits in ADMUX */
+
+/**
+ * @brief Initializes the Analog-to-Digital Converter peripheral.
+ */
+void adc_init(void);
+
+/**
+ * @brief Reads a 10-bit analog sample and scales it down to an 8-bit resolution.
+ * @param channel The ADC input channel (0 to 7).
+ * @return Scaled 8-bit digital representation of the analog input.
+ */
+uint8_t adc_read_scaled(uint8_t channel);
+
+
+
+
+#endif /* ADC_H_ */
+
+
+PWM.C
+
+#include <avr/io.h>
+#include "pwm.h"
+
+void pwm_init(void) {
+    /* Configure OC0A pin as output */
+    MOTOR_DDR |= (1 << MOTOR_PIN_OC0A);
+    
+    /* 
+     * Configure Timer/Counter Control Register A (TCCR0A):
+     * - Fast PWM Mode, Clear OC0A on Compare Match (Non-inverting mode)
+     */
+    TCCR0A = (1 << COM0A1) | (1 << WGM01) | (1 << WGM00);
+    
+    /* Set Prescaler to 64 and Start Timer0 (Frequency: ~976.5 Hz) */
+    TCCR0B = (1 << CS01) | (1 << CS00);
+    
+    /* Set initial duty cycle to 0% */
+    OCR0A = 0;
+}
+
+void pwm_set_duty(uint8_t duty_cycle) {
+    /* Update Output Compare Register A */
+    OCR0A = duty_cycle;
+}
+
+
+PWM.H
+
+#ifndef PWM_H_
+#define PWM_H_
+
+#include <stdint.h>
+
+/* Hardware Pin Definitions */
+#define MOTOR_DDR         DDRD        /**< Data Direction Register for Motor */
+#define MOTOR_PORT        PORTD       /**< Port Register for Motor */
+#define MOTOR_PIN_OC0A    PORTD6      /**< Timer0 OC0A Output Pin (PD6) */
+
+/**
+ * @brief Configures Timer0 in Fast PWM mode on channel A (OC0A).
+ */
+void pwm_init(void);
+
+/**
+ * @brief Updates the PWM duty cycle to adjust motor speed.
+ * @param duty_cycle 8-bit value (0 to 255) determining the speed.
+ */
+void pwm_set_duty(uint8_t duty_cycle);
+
+
+
+
+
+#endif /* PWM_H_ */
+
+
+MAIN.C
+
+#ifndef F_CPU
+#define F_CPU 16000000UL /**< 16 MHz System Clock Frequency */
+#endif
+
+#include <avr/io.h>
+#include <util/delay.h>
+#include "adc.h"
+#include "pwm.h"
+
+int main(void) {
+	/* Initialize Hardware Drivers */
+	pwm_init();
+	adc_init();
+	
+	/* Super Loop */
+	while (1) {
+		/* 1. Read and scale the analog position of the potentiometer (0-255) */
+		uint8_t current_speed = adc_read_scaled(POT_ADC_CHANNEL);
+		
+		/* 2. Update the PWM duty cycle to adjust the motor speed */
+		pwm_set_duty(current_speed);
+		
+		/* 3. Stability delay to prevent rapid duty-cycle oscillations */
+		_delay_ms(20);
+	}
+	
+	return 0;
+	
+}
+
+

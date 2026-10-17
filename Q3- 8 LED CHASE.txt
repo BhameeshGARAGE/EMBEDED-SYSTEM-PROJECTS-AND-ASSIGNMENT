@@ -1,0 +1,39 @@
+Q3
+
+#ifndef F_CPU
+#define F_CPU 16000000UL   // Define CPU Clock Frequency as 16 MHz
+#endif
+
+#include <avr/io.h>        // Include AVR Input/Output register definitions
+#include <util/delay.h>    // Include delay library for timing controls
+
+// Animation Speed Configuration (Delay in milliseconds between transitions)
+#define DELAY_MS  200
+
+int main(void) {
+	// 1. Configure all 8 pins of PORTB (PB0 to PB7) as OUTPUT pins
+	// 0xFF in binary is 11111111, setting all data direction bits to 1
+	DDRB = 0xFF;
+
+	// 2. Clear PORTB to ensure all LEDs are initially turned OFF
+	PORTB = 0x00;
+
+	while (1) {
+		// Loop through all 8 LED positions (from index 0 to 7)
+		for (uint8_t i = 0; i < 8; i++) {
+			
+			// Shift bit '1' to the left by 'i' positions to turn ON a single LED.
+			// When i=0, PORTB = 0b00000001 (First LED ON)
+			// When i=1, PORTB = 0b00000010 (Second LED ON)
+			PORTB = (1 << i);
+			
+			// Wait for a short duration to make the movement visible
+			_delay_ms(DELAY_MS);
+		}
+		
+		// Once the loop ends at the 8th LED, it automatically repeats from the 1st LED
+	}
+
+	return 0;
+}
+

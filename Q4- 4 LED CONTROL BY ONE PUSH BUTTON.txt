@@ -1,0 +1,77 @@
+Q4
+
+#ifndef F_CPU
+#define F_CPU 16000000UL   // Define CPU Clock Frequency as 16 MHz
+#endif
+
+#include <avr/io.h>        // Include AVR Input/Output register definitions
+#include <util/delay.h>    // Include delay library for debouncing
+
+// Pin Definitions
+#define BUTTON  PD2
+
+/**
+ * @brief Dedicated function to update PORTB pins 0-3 based on a 4-bit binary value.
+ *        Defined before main() to prevent 'undefined reference' linker errors.
+ * @param count The 4-bit value to display (0 to 15)
+ */
+void update_leds(uint8_t count) {
+    // Clear the lower 4 bits of PORTB (PB0-PB3) while keeping upper bits unchanged
+    PORTB &= ~0x0F;
+    
+    // Mask the count value to ensure it only affects the lower 4 bits, then write to PORTB
+    PORTB |= (count & 0x0F);
+}
+
+int main(void) {
+    // 1. Configure PORTB Pins 0, 1, 2, and 3 as OUTPUT (0x0F = 0b00001111)
+    DDRB |= 0x0F;
+    
+    // 2. Configure BUTTON pin (PD2) as INPUT
+    DDRD &= ~(1 << BUTTON);
+    
+    // 3. Enable Internal Pull-up resistor for the BUTTON
+    PORTD |= (1 << BUTTON);
+    
+    // Initialize counter variable to 0
+    uint8_t counter = 0;
+    
+    // Initial display: Turn all 4 LEDs OFF (0000)
+    update_leds(counter);
+    
+    // Variable to track the previous state of the button (State Change Detection)
+    uint8_t button_was_pressed = 0;
+    
+    while (1) {
+        // Check if the button is pressed (Active LOW due to pull-up)
+        if (!(PIND & (1 << BUTTON))) {
+            
+            // Software Debouncing: Wait for 20ms to filter mechanical noise
+            _delay_ms(20);
+            
+            // Re-verify if the button is still pressed and wasn't handled yet
+            if (!(PIND & (1 << BUTTON)) && !button_was_pressed) {
+                
+                // Increment counter by 1
+                counter++;
+                
+                // If counter exceeds 15 (4-bit maximum), reset back to 0
+                if (counter > 15) {
+                    counter = 0;
+                }
+                
+                // Call dedicated function to update the LED display
+                update_leds(counter);
+                
+                // Set the flag to true so it triggers only ONCE per press
+                button_was_pressed = 1;
+            }
+        } 
+        else {
+            // Button is released, reset the tracking flag
+            button_was_pressed = 0;
+        }
+    }
+
+    return 0;
+}

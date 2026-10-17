@@ -1,0 +1,110 @@
+Q9)
+
+#ifndef F_CPU
+#define F_CPU 16000000UL // Define CPU clock frequency as 16MHz
+#endif
+
+#include <avr/io.h>
+#include <util/delay.h>
+#include <stdint.h> // Required for fixed-width integers (uint8_t) to prevent compiler errors
+
+// ============================================================================
+// 1. GLOBAL CONFIGURATIONS
+// ============================================================================
+
+// Pin Allocations
+#define PWM_PIN     PORTD6    // OC0A pin (PORTD Pin 6) for PWM output
+#define BUTTON_PIN  PORTD2    // Input pin (PORTD Pin 2) for the push-button
+
+// 8-bit Duty Cycle Register Values (Range: 0 to 255)
+#define DUTY_25     64        // 25% of 255
+#define DUTY_50     128       // 50% of 255
+#define DUTY_75     191       // 75% of 255
+#define DUTY_OFF    0         // 0% (100% Completely OFF)
+
+// ============================================================================
+// 2. MODULAR FUNCTION PROTOTYPES
+// ============================================================================
+void pwm_init(void);
+void pwm_set_duty(uint8_t duty);
+void button_init(void);
+uint8_t button_is_pressed(void);
+
+// ============================================================================
+// 3. MAIN APPLICATION ENTRY POINT
+// ============================================================================
+int main(void) {
+    // Array storing the sequential duty cycles: 25% -> 50% -> 75% -> OFF
+    const uint8_t duty_sequence[] = {DUTY_25, DUTY_50, DUTY_75, DUTY_OFF};
+    uint8_t current_step = 0; // Initialize at index 0 (Starts at 25% Duty Cycle)
+
+    // Initialize individual hardware peripheral modules
+    button_init();
+    pwm_init();
+
+    // Apply the initial mandatory 25% duty cycle at startup
+    pwm_set_duty(duty_sequence[current_step]);
+
+    while (1) {
+        // Continuous polling loop monitoring the push-button state
+        if (button_is_pressed()) {
+            // Move to the next duty cycle step and roll back to 0 after index 3
+            current_step = (current_step + 1) % 4;
+            
+            // Dynamically update the output duty cycle
+            pwm_set_duty(duty_sequence[current_step]);
+        }
+    }
+    return 0;
+}
+
+// ============================================================================
+// 4. PWM MODULE IMPLEMENTATION
+// ============================================================================
+/**
+ * @brief Configures Timer0 registers into Fast PWM Non-Inverting Mode.
+ */
+void pwm_init(void) {
+    DDRD |= (1 << PWM_PIN);                       // Set PWM pin (OC0A) as Output
+    TCCR0A |= (1 << WGM01) | (1 << WGM00);        // Configure Timer0 into Fast PWM Mode
+    TCCR0A |= (1 << COM0A1);                      // Set to Non-Inverting PWM Output mode
+    TCCR0B |= (1 << CS01) | (1 << CS00);          // Set Clock Prescaler to 64 and start Timer
+}
+
+/**
+ * @brief Modifies the Output Compare Register to update the physical PWM signal.
+ * @param duty The raw 8-bit timer threshold value (0-255).
+ */
+void pwm_set_duty(uint8_t duty) {
+    OCR0A = duty;                                 // Load the new value into hardware register
+}
+
+// ============================================================================
+// 5. BUTTON MODULE IMPLEMENTATION
+// ============================================================================
+/**
+ * @brief Configures the push-button pin with active internal pull-up hardware.
+ */
+void button_init(void) {
+    DDRD &= ~(1 << BUTTON_PIN);                   // Configure button pin as Input
+    PORTD |= (1 << BUTTON_PIN);                   // Enable internal pull-up resistor (Active Low)
+}
+
+/**
+ * @brief Checks for a button press and executes a stable software debounce algorithm.
+ * @return 1 if a unique valid button press is confirmed, 0 otherwise.
+ */
+uint8_t button_is_pressed(void) {
+    // Check if the pin is pulled LOW (button actively pressed)
+    if (!(PIND & (1 << BUTTON_PIN))) {            
+        _delay_ms(20);                            // Execution delay for software debouncing
+        
+        // Double check to ensure the pin status remains stable after bounce period
+        if (!(PIND & (1 << BUTTON_PIN))) {        
+            // Block program execution until button is fully released to avoid multi-triggering
+            while (!(PIND & (1 << BUTTON_PIN)));  
+            return 1;                             // Valid state change confirmed
+        }
+    }
+    return 0;                                     // No valid button press detected
+}

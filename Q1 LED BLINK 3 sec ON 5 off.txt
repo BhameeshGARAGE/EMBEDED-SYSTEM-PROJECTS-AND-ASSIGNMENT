@@ -1,0 +1,30 @@
+Q1
+
+#ifndef F_CPU
+#define F_CPU 16000000UL   // Define CPU Clock Frequency as 16 MHz
+#endif
+
+#include <avr/io.h>        // Include AVR Input/Output library
+#include <util/delay.h>    // Include library for delay functions
+
+int main(void) {
+	// 1. Configure PORTD Pin 5 (PD5) as an OUTPUT pin
+	DDRD |= (1 << PD5);
+
+	// 2. Infinite loop to continuously repeat the sequence
+	while (1) {
+		// Turn the LED ON immediately
+		PORTD |= (1 << PD5);
+		
+		// Wait for exactly 3 seconds (3000 milliseconds)
+		_delay_ms(3000);
+
+		// Turn the LED OFF
+		PORTD &= ~(1 << PD5);
+		
+		// Wait for exactly 5 seconds (5000 milliseconds)
+		_delay_ms(5000);
+	}
+
+	return 0;
+}

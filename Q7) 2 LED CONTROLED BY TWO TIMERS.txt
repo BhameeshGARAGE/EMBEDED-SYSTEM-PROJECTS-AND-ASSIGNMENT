@@ -1,0 +1,103 @@
+Q7)
+
+PIN CONFIG
+
+#ifndef PIN_CONFIG_H_
+#define PIN_CONFIG_H_
+
+#include <avr/io.h>
+
+// --- LED Pin Definitions ---
+#define LED_DDR             DDRB
+#define LED_PORT            PORTB
+
+#define STATUS_LED_PIN      PB1    // Status LED connected to PORTB Pin 1
+#define HEARTBEAT_LED_PIN   PB2    // Heartbeat LED connected to PORTB Pin 2
+
+// --- Inline Function for Pin Initialization ---
+static inline void pin_init(void) {
+	// Configure Status LED and Heartbeat LED pins as output
+	LED_DDR |= (1 << STATUS_LED_PIN) | (1 << HEARTBEAT_LED_PIN);
+}
+
+#endif /* PIN_CONFIG_H_ */
+
+
+TIMER .C
+
+#include "timers.h"
+#include <avr/interrupt.h>
+
+// Volatile variable for Timer2 software counter (500 ms)
+volatile uint16_t timer2_counter = 0;
+
+// Initialize Timer1 for 2 seconds interval
+void timer1_init(void) {
+	TCCR1B |= (1 << WGM12);               // Set CTC mode
+	OCR1A = 31249;                        // 2 seconds interval match value
+	TIMSK1 |= (1 << OCIE1A);              // Enable Compare Match Interrupt
+	TCCR1B |= (1 << CS12) | (1 << CS10);  // Prescaler 1024 and start
+}
+
+// Initialize Timer2 for 1 millisecond interval
+void timer2_init(void) {
+	TCCR2A |= (1 << WGM21);               // Set CTC mode
+	OCR2A = 249;                          // 1 ms interval match value
+	TIMSK2 |= (1 << OCIE2A);              // Enable Compare Match Interrupt
+	TCCR2B |= (1 << CS22);                // Prescaler 64 and start
+}
+
+// Interrupt Service Routine for Timer1 (Every 2 seconds)
+ISR(TIMER1_COMPA_vect) {
+	LED_PORT ^= (1 << STATUS_LED_PIN);    // Toggle Status LED
+}
+
+// Interrupt Service Routine for Timer2 (Every 1 millisecond)
+ISR(TIMER2_COMPA_vect) {
+	timer2_counter++;
+	
+	// Check if 500 milliseconds have passed
+	if (timer2_counter >= 500) {
+		LED_PORT ^= (1 << HEARTBEAT_LED_PIN); // Toggle Heartbeat LED
+		timer2_counter = 0;                  // Reset counter
+	}
+	
+}
+
+
+TIMER .H
+
+#ifndef TIMERS_H_
+#define TIMERS_H_
+
+#include "pin_config.h"
+
+// Function Prototypes for Timers
+void timer1_init(void);
+void timer2_init(void);
+
+#endif /* TIMERS_H_ */
+
+
+
+MAIN .C
+
+#include "timers.h"
+#include <avr/interrupt.h>
+
+int main(void) {
+	// Initialize IO Pins from pin_config.h
+	pin_init();
+	
+	// Initialize both timers
+	timer1_init();
+	timer2_init();
+	
+	// Enable global interrupts
+	sei();
+	
+	// Infinite loop
+	while (1) {
+		// Main loop is free for other tasks
+	}
+}

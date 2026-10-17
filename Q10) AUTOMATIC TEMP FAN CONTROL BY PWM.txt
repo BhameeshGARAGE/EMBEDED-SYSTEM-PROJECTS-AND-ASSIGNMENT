@@ -1,0 +1,240 @@
+Q10)
+
+ADC.C
+
+
+#include "adc.h"
+
+// Initialize the Analog-to-Digital Converter peripheral
+void adc_init(void) {
+	ADMUX = (1 << REFS0); // Set voltage reference source to AVcc (5V Reference)
+	
+	// Enable ADC module and configure prescaler factor to 128 (16MHz/128 = 125kHz clock)
+	ADCSRA = (1 << ADEN) | (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0);
+}
+
+// Read, sample, and convert raw analog voltage data from LM35 to Celsius
+float read_temperature(void) {
+	// Select targeted analog inputs channel while maintaining reference settings
+	ADMUX = (ADMUX & 0xF0) | (LM35_CH & 0x0F);
+	
+	ADCSRA |= (1 << ADSC);           // Fire up the ADC conversion processes
+	
+	while (ADCSRA & (1 << ADSC));    // Hardware polling loop: Wait until conversion drops to 0
+	
+	uint16_t adc_value = ADC;        // Extract absolute 10-bit digital value
+	
+	// Convert digitized step parameters directly into standard voltage metric values
+	float voltage = (adc_value * ADC_REF_VOLTAGE) / ADC_TOTAL_STEPS;
+	
+	// Process Celsius conversion metrics (LM35 provides 10mV per Degree C, so 1V = 100°C)
+	float raw_temp = voltage * 100.0f;
+	
+	return (raw_temp + SENSOR_TEMP_OFFSET); // Return precision calibrated data loop
+}
+
+
+ADC.H
+
+#ifndef ADC_H_
+#define ADC_H_
+
+#include "system.h"
+
+// Function Prototypes for ADC initialization and reading data
+void adc_init(void);
+float read_temperature(void);
+
+#endif /* ADC_H_ */
+
+BUTTON.C
+
+#include "button.h"
+#include <avr/interrupt.h>
+#include <util/delay.h>
+
+// Initialize GPIO and External Interrupts for the Push-Button
+void button_init(void) {
+	BUTTON_DDR &= ~(1 << BUTTON_PIN); // Configure button pin as Input
+	BUTTON_PORT |= (1 << BUTTON_PIN); // Enable Internal Pull-up resistor
+	
+	// Configure External Interrupt INT0 for Falling Edge Activation
+	EICRA |= (1 << ISC01);
+	EICRA &= ~(1 << ISC00);
+	EIMSK |= (1 << INT0);             // Enable INT0 External Interrupt Mask
+}
+
+// Interrupt Service Routine dedicated to handling the Push-Button press
+ISR(INT0_vect) {
+	_delay_ms(50);                    // Software debouncing delay
+	
+	// Verify if the button pin is still pressed (Logic LOW due to pull-up)
+	if (!(BUTTON_PIN_REG & (1 << BUTTON_PIN))) {
+		system_on = !system_on;       // Toggle global power state (ON/OFF)
+	}
+}
+
+
+BUTTON.H
+
+#ifndef BUTTON_H_
+#define BUTTON_H_
+
+#include "system.h"
+
+// Function Prototype for button module initialization
+void button_init(void);
+
+#endif /* BUTTON_H_ */
+
+
+MAIN.C
+
+#include "system.h"
+#include "button.h"
+#include "adc.h"
+#include "pwm.h"
+#include <avr/interrupt.h>
+#include <util/delay.h>
+
+int main(void) {
+	// Perform centralized initialization steps for all modules
+	button_init();
+	adc_init();
+	pwm_init();
+	
+	sei(); // Authorize Global Interrupt processing loops globally
+
+	float current_temperature = 0.0f;
+	uint8_t target_motor_speed = 0;
+
+	// Core Execution Lifecycle System Loop
+	while (1) {
+		// Evaluate active system running parameters configured via button actions
+		if (system_on) {
+			current_temperature = read_temperature();                  // Process sensor reads
+			target_motor_speed = calculate_speed(current_temperature); // Map data values
+			control_motor(target_motor_speed);                         // Commit output speed
+			} else {
+			control_motor(0); // Absolute safety execution override line: Force stop motor immediately
+		}
+		
+		_delay_ms(100); // Main system refresh looping delay frequency rate
+	}
+	
+	return 0;
+}
+
+
+PIN CONFIG.H
+#ifndef PIN_CONFIG_H_
+#define PIN_CONFIG_H_
+
+#include <avr/io.h>
+
+// --- Push-Button Hardware Mapping ---
+#define BUTTON_DDR      DDRD
+#define BUTTON_PORT     PORTD
+#define BUTTON_PIN_REG  PIND
+#define BUTTON_PIN      PD2
+
+// --- DC Motor PWM Hardware Mapping ---
+#define MOTOR_DDR       DDRD
+#define MOTOR_PORT      PORTD
+#define MOTOR_PIN       PD6
+
+// --- LM35 Sensor Analog Channel ---
+#define LM35_CH         0
+
+// --- LM35 Calibration Parameters ---
+#define ADC_REF_VOLTAGE    5.0f
+#define ADC_TOTAL_STEPS    1023.0f
+#define SENSOR_TEMP_OFFSET 0.0f
+
+#endif /* PIN_CONFIG_H_ */
+
+PWM.C
+
+#include "pwm.h"
+
+// Initialize Timer0 peripheral to output Fast PWM signals for motor control
+void pwm_init(void) {
+	MOTOR_DDR |= (1 << MOTOR_PIN); // Configure Motor Control pin as Output
+
+	// Setup Timer0: Fast PWM mode, Non-Inverting Mode settings (Clear output on Compare Match)
+	TCCR0A = (1 << COM0A1) | (1 << WGM01) | (1 << WGM00);
+	TCCR0B = (1 << CS01) | (1 << CS00); // Apply clock scaling factor 64 and trigger timer
+	OCR0A = 0;                          // Initialize Output Compare Register to 0 (Motor Off)
+}
+
+// Map targeted ambient system temperatures into discrete duty speed factor levels
+uint8_t calculate_speed(float temp) {
+	uint8_t duty_cycle = 0;
+	
+	if (temp < 25.0f) {
+		duty_cycle = 76;   // Safe baseline operation scale: Set around 30% duty output speed
+	}
+	else if (temp >= 25.0f && temp <= 40.0f) {
+		duty_cycle = 153;  // Standard automatic cooling load run: Set around 60% duty output speed
+	}
+	else {
+		duty_cycle = 255;  // Extreme safe overload cooling activation: Force 100% full speed duty
+	}
+	
+	return duty_cycle;
+}
+
+// Drive hardware registers to update PWM signals instantly
+void control_motor(uint8_t speed) {
+	OCR0A = speed; // Adjust Counter compare limits register dynamically to alter fan velocity
+}
+
+
+PWM.H
+
+#ifndef PWM_H_
+#define PWM_H_
+
+#include "system.h"
+
+// Function Prototypes for motor speed speed tracking and hardware outputs control
+void pwm_init(void);
+uint8_t calculate_speed(float temp);
+void control_motor(uint8_t speed);
+
+#endif /* PWM_H_ */
+
+SYSTEM.C
+
+#include "system.h"
+
+// Initialize the global system power state to OFF initially
+volatile uint8_t system_on = 0;
+
+SYSTEM.H
+
+#ifndef SYSTEM_H_
+#define SYSTEM_H_
+
+#include <stdint.h>       // Mandatory header to resolve 'uint8_t' and 'int8_t' types
+#include <avr/io.h>
+#include "pin_config.h"
+
+// Define System Clock Frequency for delay calculations if not defined globally
+#ifndef F_CPU
+#define F_CPU 16000000UL
+#endif
+
+// Shared global variable to track system running state (0 = OFF, 1 = ON)
+extern volatile uint8_t system_on;
+
+#endif /* SYSTEM_H_ */
+
+SYSTEM.C
+
+#include "system.h"
+
+// Initialize the global system power state to OFF initially
+volatile uint8_t system_on = 0;
+
+

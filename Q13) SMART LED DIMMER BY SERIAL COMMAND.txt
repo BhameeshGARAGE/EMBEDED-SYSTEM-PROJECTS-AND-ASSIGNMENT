@@ -1,0 +1,175 @@
+Q13)
+
+#define F_CPU 16000000UL
+#include <avr/io.h>
+#include <util/delay.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+
+// Include custom module headers
+#include "uart.h"
+#include "pwm.h"
+
+int main(void) {
+	char rx_buffer[16];  // Buffer array to store incoming command strings (FIXED)
+	char response[32];   // Buffer array to format outgoing response strings (FIXED)
+	
+	// Initialize both modules
+	UART_init();
+	PWM_init();
+	
+	while (1) {
+		// Read string from serial port
+		UART_receive_string(rx_buffer, sizeof(rx_buffer));
+		
+		// Command execution logic
+		if (strcmp(rx_buffer, "ON") == 0) {
+			PWM_set_brightness(100);
+			UART_transmit_string("LED is now ON\r\n");
+		}
+		else if (strcmp(rx_buffer, "OFF") == 0) {
+			PWM_set_brightness(0);
+			UART_transmit_string("LED is now OFF\r\n");
+		}
+		else {
+			int value = atoi(rx_buffer); // Convert string to integer
+			
+			// Check if the input is a valid number between 0 and 100
+			// Also ensure it's not a random string (atoi returns 0 for non-numeric strings,
+			// but we explicitly check if the buffer is "0" to allow 0% brightness)
+			if ((value > 0 && value <= 100) || (strcmp(rx_buffer, "0") == 0)) {
+				PWM_set_brightness((uint8_t)value);
+				
+				// Format response string safely
+				snprintf(response, sizeof(response), "Brightness set to %d%%\r\n", value);
+				UART_transmit_string(response);
+			}
+			else {
+				UART_transmit_string("Invalid Command!\r\n");
+			}
+		}
+	}
+	return 0;
+}
+
+
+
+
+pin_config.h
+
+#ifndef PIN_CONFIG_H_
+#define PIN_CONFIG_H_
+
+#include <avr/io.h>
+
+// LED Pin Configuration (PB1 / OC1A / Arduino Pin 9)
+#define LED_DDR      DDRB
+#define LED_PORT     PORTB
+#define LED_PIN      PB1
+
+#endif
+
+pwm.c
+
+#include "pwm.h"
+#include "pin_config.h" // Include pin configuration
+
+// Initialize Timer1 for Fast PWM Mode
+void PWM_init(void) {
+	// Set LED pin as output using definitions from pin_config.h
+	LED_DDR |= (1 << LED_PIN);
+	
+	// Configure Timer1: Fast PWM mode with ICR1 as TOP (Mode 14)
+	// Clear OC1A on Compare Match, set OC1A at BOTTOM (Non-inverting mode)
+	TCCR1A = (1 << COM1A1) | (1 << WGM11);
+	TCCR1B = (1 << WGM13) | (1 << WGM12) | (1 << CS11) | (1 << CS10); // Prescaler = 64
+	
+	ICR1 = 100;   // Set TOP value to 100 for direct 0-100% duty cycle mapping
+	OCR1A = 0;    // Initially, LED is turned off
+}
+
+// Update the duty cycle based on percentage (0-100)
+void PWM_set_brightness(uint8_t percentage) {
+	if (percentage > 100) {
+		percentage = 100; // Limit maximum value to 100%
+	}
+	OCR1A = percentage;   // Write value to Output Compare Register
+}
+
+
+pwm.h
+
+#ifndef PWM_H_
+#define PWM_H_
+
+#include <avr/io.h>
+
+// Function declarations for PWM module
+void PWM_init(void);
+void PWM_set_brightness(uint8_t percentage);
+
+#endif
+
+UART.C
+
+#include "uart.h"
+
+ // Initialize UART Peripheral
+ void UART_init(void) {
+	 UBRR0H = (uint8_t)(UBRR_VALUE >> 8); // Load upper 8 bits of baud rate
+	 UBRR0L = (uint8_t)(UBRR_VALUE);      // Load lower 8 bits of baud rate
+	 
+	 UCSR0B = (1 << RXEN0) | (1 << TXEN0); // Enable Receiver and Transmitter
+	 UCSR0C = (1 << UCSZ01) | (1 << UCSZ00); // Set frame format: 8 data bits, 1 stop bit
+ }
+
+ // Transmit a single character
+ void UART_transmit_char(char data) {
+	 while (!(UCSR0A & (1 << UDRE0))); // Wait for empty transmit buffer
+	 UDR0 = data;                      // Send the data
+ }
+
+ // Transmit a string
+ void UART_transmit_string(const char* str) {
+	 while (*str) {
+		 UART_transmit_char(*str++);
+	 }
+ }
+
+ // Receive a string until Newline or Carriage Return
+ void UART_receive_string(char* buffer, uint8_t max_length) {
+	 uint8_t index = 0;
+	 char c;
+	 
+	 while (index < (max_length - 1)) {
+		 while (!(UCSR0A & (1 << RXC0))); // Wait for data to be received
+		 c = UDR0;                        // Get received character
+		 
+		 if (c == '\r' || c == '\n') {    // If Enter key is pressed
+			 break;
+		 }
+		 buffer[index++] = c;
+	 }
+	 buffer[index] = '\0'; // Null-terminate the string
+ }
+
+
+UART.H
+
+#ifndef UART_H_
+#define UART_H_
+
+#define F_CPU 16000000UL // Define CPU clock speed as 16 MHz
+#include <avr/io.h>
+
+#define BAUDRATE 9600
+#define UBRR_VALUE ((F_CPU / (16UL * BAUDRATE)) - 1)
+
+// Function declarations for UART module
+void UART_init(void);
+void UART_transmit_char(char data);
+void UART_transmit_string(const char* str);
+void UART_receive_string(char* buffer, uint8_t max_length);
+
+#endif

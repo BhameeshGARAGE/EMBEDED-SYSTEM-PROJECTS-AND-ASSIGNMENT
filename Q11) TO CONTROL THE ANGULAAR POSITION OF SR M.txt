@@ -1,0 +1,128 @@
+Q11
+
+adc.c
+
+#include "adc.h"
+
+// Initialize ADC Peripheral
+void adc_init(void) {
+	// Set reference voltage to AVCC (5V) with external capacitor at AREF pin
+	ADMUX = (1 << REFS0);
+	
+	// Enable ADC and set Prescaler to 128 (16MHz / 128 = 125kHz ADC clock)
+	ADCSRA = (1 << ADEN) | (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0);
+}
+
+// Read 10-bit ADC value from specified channel
+uint16_t adc_read(uint8_t channel) {
+	// Select ADC channel (clear old channel bits and set new one)
+	ADMUX = (ADMUX & 0xF0) | (channel & 0x0F);
+	
+	// Start the conversion
+	ADCSRA |= (1 << ADSC);
+	
+	// Wait for conversion to complete (ADSC becomes 0)
+	while (ADCSRA & (1 << ADSC));
+	
+	// Return the 10-bit digital result
+	return ADC;
+}
+
+
+adc.h
+
+#ifndef ADC_H_
+#define ADC_H_
+
+#include <avr/io.h>
+
+// Function prototypes
+void adc_init(void);
+uint16_t adc_read(uint8_t channel);
+
+
+
+
+
+
+#endif /* ADC_H_ */
+
+
+pwm.c
+
+#include "pwm.h"
+
+// Initialize Timer1 in 16-bit Phase Correct PWM Mode
+void timer1_init(void) {
+	// Clear OC1A on Compare Match when up-counting, set when down-counting (Non-Inverting)
+	// Set WGM11 and WGM10 bits for Mode 11 (Phase Correct PWM, TOP = ICR1)
+	TCCR1A = (1 << COM1A1) | (1 << WGM11) | (1 << WGM10);
+	
+	// Set WGM13 bit and Clock Prescaler = 8 (CS11 bit)
+	TCCR1B = (1 << WGM13) | (1 << CS11);
+	
+	// Set TOP value for 50Hz frequency
+	// Formula: F_pwm = F_cpu / (2 * Prescaler * TOP)
+	// 50 = 16,000,000 / (2 * 8 * TOP) -> TOP = 20,000
+	ICR1 = 20000;
+	
+	// Initialize servo at 0 degrees (1ms pulse width = 1000 counts)
+	OCR1A = 1000;
+}
+
+
+
+pwm.h
+
+#ifndef PWM_H_
+#define PWM_H_
+
+#include <avr/io.h>
+
+// Function prototype
+void timer1_init(void);
+
+
+
+
+
+#endif /* PWM_H_ */
+
+
+main.c
+
+#define F_CPU 16000000UL // Define CPU frequency as 16MHz for delay
+#include <avr/io.h>
+#include <util/delay.h>
+#include "adc.h"
+#include "pwm.h"
+
+int main(void) {
+	// Configure PORTB Pin 1 (OC1A) as output for Servo PWM
+	DDRB |= (1 << DDB1);
+	
+	// Initialize ADC and Timer1 Peripherals
+	adc_init();
+	timer1_init();
+	
+	uint16_t adc_val = 0;
+	uint16_t pulse_width = 0;
+
+	while (1) {
+		// Read 10-bit analog value from Channel 0 (Potentiometer)
+		adc_val = adc_read(0);
+		
+		// Map 0-1023 (ADC range) to 1000-2000 (1ms to 2ms pulse width for 50Hz PWM)
+		// 1ms pulse corresponds to 0 degrees, 2ms pulse corresponds to 180 degrees
+		pulse_width = 1000 + ((uint32_t)adc_val * 1000) / 1023;
+		
+		// Update the Compare Match Register to change servo position
+		OCR1A = pulse_width;
+		
+		// Small delay for real-time stability
+		_delay_ms(20);
+	}
+	
+	return 0;
+}
+

@@ -1,0 +1,87 @@
+Q6
+
+#ifndef F_CPU
+#define F_CPU 16000000UL   // Define CPU Clock Frequency as 16 MHz
+#endif
+
+#include <avr/io.h>        // Include AVR Input/Output register definitions
+#include <avr/interrupt.h> // Include AVR Interrupt library
+
+// Hardware Pin Definitions
+#define GREEN_LED  PB0
+#define ORANGE_LED PB1
+#define RED_LED    PB2
+#define EM_BUTTON  PD2     // INT0 pin for Emergency Push-Button
+
+// Volatile flag for External Interrupt
+volatile uint8_t emergency_flag = 0;
+
+/**
+ * @brief Custom non-blocking function to wait for 1 second.
+ *        It monitors the emergency button via interrupt while counting time.
+ */
+void wait_one_second(void) {
+    // 10,000 counts of 100 microseconds equals exactly 1 second
+    for (uint16_t i = 0; i < 10000; i++) {
+        // Built-in basic delay microsecond function (not standard _delay_ms)
+        __builtin_avr_delay_cycles(1600); // 1600 cycles = 100us at 16MHz
+    }
+}
+
+/**
+ * @brief Function to wait for a specific number of seconds.
+ *        It runs a loop for the given duration.
+ */
+void wait_seconds(uint8_t seconds) {
+    for (uint8_t i = 0; i < seconds; i++) {
+        wait_one_second();
+    }
+}
+
+int main(void) {
+    // 1. Configure Traffic Light pins (PB0, PB1, PB2) as OUTPUT
+    DDRB |= (1 << GREEN_LED) | (1 << ORANGE_LED) | (1 << RED_LED);
+    
+    // 2. Configure Emergency Button pin (PD2) as INPUT with Internal Pull-up
+    DDRD &= ~(1 << EM_BUTTON);
+    PORTD |= (1 << EM_BUTTON);
+    
+    // 3. Configure External Interrupt 0 (INT0) to trigger on Falling Edge
+    EICRA |= (1 << ISC01);
+    EIMSK |= (1 << INT0);
+    
+    // 4. Enable Global Interrupts
+    sei();
+
+    while (1) {
+        // --- GREEN LIGHT PHASE ---
+        PORTB = (1 << GREEN_LED);       // Turn ON Green LED, others OFF
+        wait_seconds(10);               // Wait for safe duration of 10 seconds
+        
+        // --- ORANGE LIGHT PHASE ---
+        PORTB = (1 << ORANGE_LED);      // Turn ON Orange LED, others OFF
+        wait_seconds(3);                // Wait for safe duration of 3 seconds
+        
+        // --- RED LIGHT PHASE ---
+        PORTB = (1 << RED_LED);         // Turn ON Red LED, others OFF
+        wait_seconds(10);               // Wait for safe duration of 10 seconds
+        
+        // --- END OF CYCLE: EMERGENCY CHECK ---
+        // If the emergency button was pressed at any point during the cycle
+        if (emergency_flag == 1) {
+            PORTB = (1 << GREEN_LED);   // Give priority back to Green LED immediately
+            wait_seconds(10);           // Keep Green ON for 10 seconds
+            emergency_flag = 0;         // Reset the emergency flag
+        }
+    }
+
+    return 0;
+}
+
+/**
+ * @brief Interrupt Service Routine (ISR) for External Interrupt 0 (INT0).
+ *        Triggers instantly when the button is pressed.
+ */
+ISR(INT0_vect) {
+    emergency_flag = 1;                 // Only set the flag, do not change lights here
+}

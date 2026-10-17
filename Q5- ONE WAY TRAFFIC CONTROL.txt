@@ -1,0 +1,104 @@
+#ifndef F_CPU
+#define F_CPU 16000000UL   // Define CPU Clock Frequency as 16 MHz
+#endif
+
+#include <avr/io.h>        // Include AVR Input/Output register definitions
+#include <avr/interrupt.h> // Include standard AVR Interrupt library for ISR and sei()
+
+// Hardware Pin Definitions for Traffic Lights on PORTB
+#define GREEN_LED  PB0
+#define ORANGE_LED PB1
+#define RED_LED    PB2
+
+// State Machine Definitions for Traffic Light Phases
+typedef enum {
+    STATE_GREEN,
+    STATE_ORANGE,
+    STATE_RED
+} TrafficState_t;
+
+// Global variables for timing and state control
+volatile uint16_t millisecond_counter = 0;
+volatile uint16_t state_duration_seconds = 0;
+
+/**
+ * @brief Initialize Timer0 in CTC (Clear Timer on Compare Match) mode.
+ *        Configured to generate an interrupt exactly every 1 millisecond.
+ */
+void timer0_init(void) {
+    // Set CTC Mode (WGM01 = 1, WGM00 = 0)
+    TCCR0A = (1 << WGM01);
+    
+    // Set Prescaler to 64 (CS01 = 1, CS00 = 1)
+    TCCR0B = (1 << CS01) | (1 << CS00);
+    
+    // Output Compare Register calculation for 1ms interval at 16MHz clock:
+    // OCR0A = (Target_Time * F_CPU) / Prescaler - 1
+    // OCR0A = (0.001 * 16000000) / 64 - 1 = 249
+    OCR0A = 249;
+    
+    // Enable Timer0 Compare Match A Interrupt
+    TIMSK0 |= (1 << OCIE0A);
+}
+
+int main(void) {
+    // 1. Configure Traffic Light pins (PB0, PB1, PB2) as OUTPUT
+    DDRB |= (1 << GREEN_LED) | (1 << ORANGE_LED) | (1 << RED_LED);
+    
+    // 2. Initialize Timer0 hardware peripheral
+    timer0_init();
+    
+    // 3. Enable Global Interrupts using the standard avr-libc function
+    sei();
+    
+    // Set initial state to Green and duration to 10 seconds
+    TrafficState_t current_state = STATE_GREEN;
+    state_duration_seconds = 10;
+    
+    // Turn ON Initial State: Green LED ON, others OFF
+    PORTB = (1 << GREEN_LED);
+
+    while (1) {
+        // Critical Section: Temporarily disable interrupts to safely read volatile variable
+        cli(); 
+        uint16_t elapsed_seconds = state_duration_seconds;
+        sei(); // Re-enable interrupts
+        
+        // Check if the current state duration has expired
+        if (elapsed_seconds == 0) {
+            
+            // State Machine Transition Logic
+            switch (current_state) {
+                case STATE_GREEN:
+                    // Green duration ends -> Switch to Orange for 3 seconds
+                    PORTB = (1 << ORANGE_LED);
+                    current_state = STATE_ORANGE;
+                    
+                    cli();
+                    state_duration_seconds = 3;
+                    sei();
+                    break;
+                    
+                case STATE_ORANGE:
+                    // Orange duration ends -> Switch to Red for 10 seconds
+                    PORTB = (1 << RED_LED);
+                    current_state = STATE_RED;
+                    
+                    cli();
+                    state_duration_seconds = 10;
+                    sei();
+                    break;
+                    
+                case STATE_RED:
+                    // Red duration ends -> Reset back to Green for 10 seconds
+                    PORTB = (1 << GREEN_LED);
+                    current_state = STATE_GREEN;
+                    
+                    cli();
+                    state_duration_seconds = 10;
+                    sei();
+                    break;
+            }
+        }
+    }
+}

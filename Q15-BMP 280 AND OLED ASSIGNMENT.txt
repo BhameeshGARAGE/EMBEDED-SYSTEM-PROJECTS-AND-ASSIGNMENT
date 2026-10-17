@@ -1,0 +1,292 @@
+Q15)
+
+bmp280.c
+
+#include "bmp280.h"
+#include "i2c.h"
+
+// Static factory compensation variables to store internal sensor calibration parameters
+static uint16_t dig_T1;
+static int16_t  dig_T2;
+static int16_t  dig_T3;
+
+void bmp280_init(void) {
+	// Read the required temperature calibration parameters from the sensor memory registers
+	i2c_start();
+	i2c_write((BMP280_ADDR << 1) | 0); // Write mode address packet
+	i2c_write(0x88);                   // Calibration register start block address
+	
+	i2c_start();
+	i2c_write((BMP280_ADDR << 1) | 1); // Read mode address packet
+	
+	dig_T1 = i2c_read_ack() | (i2c_read_ack() << 8);
+	dig_T2 = i2c_read_ack() | (i2c_read_ack() << 8);
+	dig_T3 = i2c_read_ack() | (i2c_read_nack() << 8);
+	i2c_stop();
+
+	// Set configuration mode to Normal, with x1 oversampling for temperature data (0x2F)
+	i2c_start();
+	i2c_write((BMP280_ADDR << 1) | 0);
+	i2c_write(0xF4); // ctrl_meas configuration register
+	i2c_write(0x2F);
+	i2c_stop();
+}
+
+int32_t bmp280_get_temperature(void) {
+	// Request temperature value data block from internal data registers
+	i2c_start();
+	i2c_write((BMP280_ADDR << 1) | 0);
+	i2c_write(0xFA); // Temperature register MSB data start address location
+	
+	i2c_start();
+	i2c_write((BMP280_ADDR << 1) | 1);
+	uint32_t msb  = i2c_read_ack();
+	uint32_t lsb  = i2c_read_ack();
+	uint32_t xlsb = i2c_read_nack();
+	i2c_stop();
+	
+	// Stitch separate digital register registers into full 20-bit raw integer data
+	int32_t adc_T = (msb << 12) | (lsb << 4) | (xlsb >> 4);
+	
+	// Formulate official datasheet calibration compensation math to get exact value
+	int32_t var1 = ((((adc_T >> 3) - ((int32_t)dig_T1 << 1))) * ((int32_t)dig_T2)) >> 11;
+	int32_t var2 = (((((adc_T >> 4) - ((int32_t)dig_T1)) * ((adc_T >> 4) - ((int32_t)dig_T1))) >> 12) * ((int32_t)dig_T3)) >> 14;
+	
+	int32_t t_fine = var1 + var2;
+	int32_t T = (t_fine * 5 + 128) >> 8; // Calculate temperature output scaled in Celsius
+	
+	return T;
+}
+
+
+
+
+
+BMP280 .H
+
+#ifndef BMP280_H_
+#define BMP280_H_
+
+#include <stdint.h>
+
+#define BMP280_ADDR 0x76 // Default factory assigned hardware I2C address for BMP280
+
+void bmp280_init(void);
+int32_t bmp280_get_temperature(void);
+
+
+
+
+
+
+#endif /* BMP280_H_ */
+
+
+I2C.C
+
+#include "i2c.h"
+
+void i2c_init(void) {
+	TWSR = 0x00; // Set I2C prescaler to 1
+	TWBR = 0x48; // Configure SCL clock frequency to 100kHz at 16MHz F_CPU
+	TWCR = (1 << TWEN); // Enable the TWI (I2C) hardware module
+}
+
+void i2c_start(void) {
+	TWCR = (1 << TWINT) | (1 << TWSTA) | (1 << TWEN); // Send START condition
+	while (!(TWCR & (1 << TWINT))); // Wait until START condition finishes transmitting
+}
+
+void i2c_stop(void) {
+	TWCR = (1 << TWINT) | (1 << TWSTO) | (1 << TWEN); // Send STOP condition
+	while (TWCR & (1 << TWSTO)); // Wait until STOP condition finishes execution
+}
+
+void i2c_write(uint8_t data) {
+	TWDR = data; // Load payload byte data into the I2C data register
+	TWCR = (1 << TWINT) | (1 << TWEN); // Launch byte transmission process
+	while (!(TWCR & (1 << TWINT))); // Wait until byte is completely transmitted
+}
+
+uint8_t i2c_read_ack(void) {
+	TWCR = (1 << TWINT) | (1 << TWEN) | (1 << TWEA); // Enable ACK to ask for next byte
+	while (!(TWCR & (1 << TWINT))); // Wait until byte data is received
+	return TWDR; // Return the read data byte
+}
+
+uint8_t i2c_read_nack(void) {
+	TWCR = (1 << TWINT) | (1 << TWEN); // Request byte data with NACK for last byte
+	while (!(TWCR & (1 << TWINT))); // Wait until byte data is received
+	return TWDR; // Return the read data byte
+}
+
+
+
+I2C.H
+
+#ifndef I2C_H_
+#define I2C_H_
+
+#include <avr/io.h>
+
+void i2c_init(void);
+void i2c_start(void);
+void i2c_stop(void);
+void i2c_write(uint8_t data);
+uint8_t i2c_read_ack(void);
+uint8_t i2c_read_nack(void);
+
+
+
+
+
+
+#endif /* I2C_H_ */
+
+
+SSD1306.C
+
+#include "ssd1306.h"
+#include "i2c.h"
+
+// 5x7 ASCII grid font mapping matrix definition layout array data
+static const uint8_t font_5x7[][5] = {
+	{0x00, 0x00, 0x00, 0x00, 0x00}, // Space Character (Index 0)
+	{0x3e, 0x41, 0x41, 0x41, 0x3e}, // 0 (Index 1)
+	{0x00, 0x42, 0x7f, 0x40, 0x00}, // 1
+	{0x42, 0x61, 0x51, 0x49, 0x46}, // 2
+	{0x21, 0x41, 0x45, 0x4b, 0x31}, // 3
+	{0x18, 0x14, 0x12, 0x7f, 0x10}, // 4
+	{0x27, 0x45, 0x45, 0x45, 0x39}, // 5
+	{0x3c, 0x4a, 0x49, 0x49, 0x30}, // 6
+	{0x01, 0x71, 0x09, 0x05, 0x03}, // 7
+	{0x36, 0x49, 0x49, 0x49, 0x36}, // 8
+	{0x06, 0x49, 0x49, 0x29, 0x1e}, // 9 (Index 10)
+	{0x00, 0x36, 0x36, 0x00, 0x00}, // : Symbol (Index 11)
+	{0x00, 0x06, 0x09, 0x09, 0x06}, // ° Degree Sign Layout (Index 12)
+	{0x3e, 0x41, 0x41, 0x41, 0x22}  // C Letter layout data (Index 13)
+};
+
+static void oled_send_command(uint8_t cmd) {
+	i2c_start();
+	i2c_write(OLED_ADDR << 1);
+	i2c_write(0x00); // Control packet flag stream signal parameter
+	i2c_write(cmd);
+	i2c_stop();
+}
+
+void oled_init(void) {
+	oled_send_command(0xAE); // Turn display off
+	oled_send_command(0x20); // Configure Memory Addressing Mode setup
+	oled_send_command(0x02); // Enable Page Addressing Mode structure rules
+	oled_send_command(0xAF); // Activate panel screen view display output
+	oled_clear();
+}
+
+void oled_clear(void) {
+	for (uint8_t p = 0; p < 8; p++) {
+		oled_set_cursor(p, 0);
+		i2c_start();
+		i2c_write(OLED_ADDR << 1);
+		i2c_write(0x40); // Launch graphic display data data frame stream configuration
+		for (uint8_t c = 0; c < 128; c++) {
+			i2c_write(0x00); // Flush and empty out pixels across entire layout
+		}
+		i2c_stop();
+	}
+}
+
+void oled_set_cursor(uint8_t page, uint8_t column) {
+	oled_send_command(0xB0 + page);                 // Set page layout address block target
+	oled_send_command(0x00 + (column & 0x0F));      // Map lower column pointer bits
+	oled_send_command(0x10 + ((column >> 4) & 0x0F));// Map upper column pointer bits
+}
+
+void oled_print_string(const char* str) {
+	while (*str) {
+		char c = *str++;
+		uint8_t idx = 0;
+		
+		// Match specific string parsing array tracking layout values
+		if (c == ' ') idx = 0;
+		else if (c >= '0' && c <= '9') idx = 1 + (c - '0');
+		else if (c == ':') idx = 11;
+		else if (c == 'd') idx = 12; // Maps character 'd' as target shorthand indicator flag for degree sign
+		else if (c == 'C') idx = 13;
+		else continue;
+
+		i2c_start();
+		i2c_write(OLED_ADDR << 1);
+		i2c_write(0x40);
+		for (uint8_t i = 0; i < 5; i++) {
+			i2c_write(font_5x7[idx][i]); // Export font data slice matrix signals onto screen
+		}
+		i2c_write(0x00); // Apply column tracking pad spaces between strings
+		i2c_stop();
+	}
+}
+
+
+SSD1306.H
+
+#ifndef SSD1306_H_
+#define SSD1306_H_
+
+#include <stdint.h>
+
+#define OLED_ADDR 0x3C // Default factory assigned hardware I2C address for SSD1306
+
+void oled_init(void);
+void oled_clear(void);
+void oled_set_cursor(uint8_t page, uint8_t column);
+void oled_print_string(const char* str);
+
+
+
+
+
+#endif /* OLED SSD1306_H_ */
+
+
+MAIN.C
+
+#define F_CPU 16000000UL // Timing delay standard setup configuration
+#include <avr/io.h>
+#include <util/delay.h>
+#include <stdio.h>
+
+#include "i2c.h"
+#include "bmp280.h"
+#include "ssd1306.h"
+
+int main(void) {
+	char text_buffer[30]; // Buffer storage memory to hold the finalized character array string
+	
+	// Requirement Step 1: Initialize all active communicating hardware peripheral nodes
+	i2c_init();
+	bmp280_init();
+	oled_init();
+	
+	while (1) {
+		// Requirement Step 2: Extract verified raw metrics data value outputs
+		int32_t temp_scaled = bmp280_get_temperature();
+		
+		// Extract absolute discrete sections cleanly without adding resource heavy float packages
+		int16_t integral_part = temp_scaled / 100;
+		uint16_t fractional_part = temp_scaled % 100;
+		
+		// Requirement Step 3: Parse metric variables directly into string sequence arrays
+		// Note: Character token 'd' translates directly to customized degree symbol indicator
+		sprintf(text_buffer, "Temp: %d.%02d dC", integral_part, fractional_part);
+		
+		// Requirement Step 4: Wipe memory screens clean and overwrite fresh updates
+		oled_clear();
+		oled_set_cursor(3, 15); // Adjust visibility spacing placement
+		oled_print_string(text_buffer);
+		
+		// Requirement Step 5: Enforce strict routine update tracking limits every 2 seconds
+		_delay_ms(2000);
+	}
+	
+	return 0;
+}
